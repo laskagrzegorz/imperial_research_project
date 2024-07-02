@@ -1009,7 +1009,6 @@ def walden_one_step_algorithm(x, best_m, T, C, D, m1, m2, num_iter, alpha):
 
     _, T_0, _ = calculate_freq_avg_periodogram(x, best_m)
 
-
     for edge, value in final_table.items():
         E = {edge}
         T_1, T_2, test_stat = calculate_test_stat(T_0, set(), E, best_m,

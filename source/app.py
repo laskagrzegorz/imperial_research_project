@@ -341,10 +341,6 @@ def do_analysis(A_list, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=T
                 "as this formula requires all the positive Fourier frequencies</p>",
                 unsafe_allow_html=True)
 
-
-
-             # TODO add the equations for CVLL
-
     # True M
     run_algorithms_given_m(x, best_m, alpha, T, C, D,
                            m2, m1, num_iter, A_list)
@@ -363,13 +359,6 @@ def do_analysis(A_list, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=T
 
         run_algorithms_given_m(x, m_plus_50, alpha, T, C, D,
                                m2, m1, num_iter, A_list)
-
-
-
-
-
-
-
 
 
 def insert_page(A_list, T=1024, series_plot=False, sdf_plot=False, cvll_plot=True):
@@ -461,7 +450,6 @@ def main():
                 for i, A_list in enumerate(All_A_list_3x3_var_p):
                     with tabs[i]:
                         insert_page(A_list, T=10240)
-
 
 
 if __name__ == "__main__":
