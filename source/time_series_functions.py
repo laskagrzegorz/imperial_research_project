@@ -309,7 +309,7 @@ def true_sdf_var_process(A, Sigma, num_points=512):
 
 
 def plot_sdf_with_theoretical(frequencies, empirical_sdf_list, empirical_names, theoretical_sdf, log_scale=False,
-                              function=np.abs):
+                              function=np.abs, different_frequencies=None):
     """
     Plot the SDF for each pair of dimensions with theoretical spectrum using Plotly.
 
@@ -319,12 +319,15 @@ def plot_sdf_with_theoretical(frequencies, empirical_sdf_list, empirical_names, 
     empirical_names (list of str): List of names corresponding to each empirical SDF matrix.
     theoretical_sdf (np.ndarray): Theoretical spectral density function matrix.
     log_scale (bool): If True, use logarithmic scale for the y-axis.
+    function (function): Function to apply to the SDF values (e.g., np.abs).
+    different_frequencies (list of np.ndarray or None): List of frequency arrays corresponding to each empirical SDF.
+                                                         If None, use the same frequencies array for all.
     """
     # Define a fixed color scheme
     colors = ['green', 'blue', 'orange', 'purple', 'brown', 'pink', 'gray', 'cyan', 'magenta']
     theoretical_color = 'red'
 
-    n_series = theoretical_sdf.shape[0]
+    n_series = empirical_sdf_list[0].shape[0]
 
     # Create a subplot grid
     fig = make_subplots(rows=n_series, cols=n_series, subplot_titles=[f'S_{i}{j}' for i in range(n_series) for j in range(n_series)],
@@ -334,24 +337,25 @@ def plot_sdf_with_theoretical(frequencies, empirical_sdf_list, empirical_names, 
     for i in range(n_series):
         for j in range(n_series):
             for idx, (empirical_sdf, name) in enumerate(zip(empirical_sdf_list, empirical_names)):
-                # TODO division by 10 why needed?
-                fig.add_trace(go.Scatter(x=frequencies, y=function(empirical_sdf[i, j, :]),
+                freqs = frequencies if different_frequencies is None else different_frequencies[idx]
+                fig.add_trace(go.Scatter(x=freqs, y=function(empirical_sdf[i, j, :]),
                                          mode='lines', name=f'{name} Empirical',
                                          line=dict(color=colors[idx % len(colors)]),
                                          legendgroup=f'{name} Empirical', showlegend=(i == 0 and j == 0)),
                               row=i + 1, col=j + 1)
 
-            fig.add_trace(go.Scatter(x=frequencies, y=function(theoretical_sdf[i, j, :]),
-                                     mode='lines', name='Theoretical', line=dict(color=theoretical_color, dash='dash'),
-                                     legendgroup='Theoretical', showlegend=(i == 0 and j == 0)),
-                          row=i + 1, col=j + 1)
+            if theoretical_sdf is not None:
+                fig.add_trace(go.Scatter(x=frequencies, y=function(theoretical_sdf[i, j, :]),
+                                         mode='lines', name='Theoretical', line=dict(color=theoretical_color, dash='dash'),
+                                         legendgroup='Theoretical', showlegend=(i == 0 and j == 0)),
+                              row=i + 1, col=j + 1)
 
             # Update y-axis to log scale if required
             if log_scale:
                 fig.update_yaxes(type="log", row=i + 1, col=j + 1)
 
             # Set axis titles
-            if i == 2:
+            if i == n_series - 1:
                 fig.update_xaxes(title_text='Frequency (Hz)', row=i + 1, col=j + 1)
             if j == 0:
                 fig.update_yaxes(title_text='Spectral Density', row=i + 1, col=j + 1)
@@ -453,7 +457,7 @@ def calculate_periodogram(X, taper=None, noise_level=1e-10):
     frequencies = np.fft.fftfreq(N)[:N // 2]
 
     # Initialize the power spectral density matrix
-    S_P = np.zeros((X.shape[0], X.shape[0], N // 2), dtype=np.complex_)
+    S_P = np.zeros((X.shape[0], X.shape[0], N // 2), dtype=np.complex128)
 
     # Calculate the power spectral density matrix for each frequency
     for i in range(N // 2):
@@ -829,6 +833,10 @@ def cvll_criterion(x, m):
     Returns:
     float: CVLL criterion value.
     """
+
+    if m % 2 != 0:
+        m += 1
+
     frequences, I = calculate_periodogram(x)
 
     N = x.shape[1]
@@ -838,17 +846,15 @@ def cvll_criterion(x, m):
     num_freq = I.shape[2]
 
     cvll = 0.0
-    for j in range(num_freq):
+    for j in range(num_freq):  # TODO: now only half frequencies //4
         hat_f_minus_j = f_hat_minus_j_0[:, :, j]
         inv_hat_f_minus_j = np.linalg.inv(hat_f_minus_j)
         term1 = np.trace(I[:, :, j] @ inv_hat_f_minus_j)
-
-
         term2 = np.log(np.linalg.det(hat_f_minus_j))
         cvll += term1 + term2
 
     cvll /= N
-    return cvll
+    return np.real(cvll)
 
 
 def find_best_m(x, m_range):

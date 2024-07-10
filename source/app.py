@@ -4,6 +4,8 @@ series_3x3_show = True
 series_5x5_show = False
 series_7x7_show = False
 
+show_t_different = False
+
 # Shift of the processes (for second part)
 p = 3
 
@@ -277,7 +279,7 @@ def run_algorithms_given_m(x, m, alpha, T, C, D, m2, m1, num_iter, A_list):
         plot_graph(x.shape[0], walden_edges_left, true_edges)
 
 
-def do_analysis(A_list, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=True):
+def do_analysis(A_list, m_range, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=True):
 
     ### To SET ###
     test_m = False
@@ -289,7 +291,6 @@ def do_analysis(A_list, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=T
     m2 = 1
     num_iter = 10
     alpha = 0.05
-    m_range = np.arange(30, 300, 2)
 
     # Generate time series
     x = generate_var_process(A_list, T, 1000, seed=None)
@@ -361,18 +362,21 @@ def do_analysis(A_list, T = 1024, series_plot=False, sdf_plot=False, cvll_plot=T
                                m2, m1, num_iter, A_list)
 
 
-def insert_page(A_list, T=1024, series_plot=False, sdf_plot=False, cvll_plot=True):
+def insert_page(A_list, m_range, T=1024, series_plot=False, sdf_plot=False, cvll_plot=True):
     st.subheader(f"The VAR({len(A_list)}) process is given by equation:")
     generate_latex_equation(A_list)
     check_series(A_list)
-    do_analysis(A_list, T=T,  series_plot=series_plot, sdf_plot=sdf_plot, cvll_plot=cvll_plot)
+    do_analysis(A_list, m_range, T=T,  series_plot=series_plot, sdf_plot=sdf_plot, cvll_plot=cvll_plot)
 
 
 def main():
+    m_range = np.arange(30, 300, 2)
+    m_range_high = np.arange(300, 800, 6)
+
     ### Page code ###
 
     st.set_page_config(
-        page_title="LLM Output Comparison",
+        page_title="Gregg's Research",
         page_icon=":material/compare_arrows:",
         layout="wide",
     )
@@ -392,14 +396,24 @@ def main():
                 tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
                 for i, A_list in enumerate(All_A_list_3x3):
                     with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True)
+                        insert_page(A_list, m_range, series_plot=False, sdf_plot=False, cvll_plot=True)
+
+
+                        st.markdown("---")
+                        st.header(f"T={10240}")
+
+                        insert_page(A_list, m_range_high, T=10240)
 
         with tabs_different_size[1]:
             if series_3x3_show:
                 tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
                 for i, A_list in enumerate(All_A_list_3x3_var_p):
                     with tabs[i]:
-                        insert_page(A_list)
+                        insert_page(A_list, m_range)
+
+                        st.header(f"T={10240}")
+
+                        insert_page(A_list, m_range_high, T=10240)
 
         ### 5x5 ###
         with tabs_different_size[2]:
@@ -407,14 +421,14 @@ def main():
                 tabs = st.tabs(["5x5: 5+", "5x5: 10+-", "5x5: 0"])
                 for i, A_list in enumerate(All_A_list_5x5):
                     with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True)
+                        insert_page(A_list, m_range)
 
         with tabs_different_size[3]:
             if series_5x5_show:
                 tabs = st.tabs(["5x5: 5+", "5x5: 10+-", "5x5: 0"])
                 for i, A_list in enumerate(All_A_list_5x5_var_p):
                     with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True)
+                        insert_page(A_list, m_range)
 
         ### 7x7 ###
         with tabs_different_size[4]:
@@ -422,34 +436,35 @@ def main():
                 tabs = st.tabs(["7x7: 21+-", "7x7: 10+-", "7x7: 21+-", "7x7: 0"])
                 for i, A_list in enumerate(All_A_list_7x7):
                     with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True)
+                        insert_page(A_list, m_range)
 
         with tabs_different_size[5]:
             if series_7x7_show:
                 tabs = st.tabs(["7x7: 21+-", "7x7: 10+-", "7x7: 21+-", "7x7: 0"])
                 for i, A_list in enumerate(All_A_list_7x7_var_p):
                     with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True)
+                        insert_page(A_list, m_range)
 
-    with tabs_different_length[1]:
+    if show_t_different:
+        with tabs_different_length[1]:
 
-        tabs_different_size = st.tabs(
-            ['VAR(1) 3x3', 'VAR(3) 3x3', 'VAR(1) 5x5', 'VAR(3) 5x5', 'VAR(1) 7x7', 'VAR(3) 7x7'])
+            tabs_different_size = st.tabs(
+                ['VAR(1) 3x3', 'VAR(3) 3x3', 'VAR(1) 5x5', 'VAR(3) 5x5', 'VAR(1) 7x7', 'VAR(3) 7x7'])
 
-        ### 3x3 ###
-        with tabs_different_size[0]:
-            if series_3x3_show:
-                tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
-                for i, A_list in enumerate(All_A_list_3x3):
-                    with tabs[i]:
-                        insert_page(A_list, series_plot=False, sdf_plot=False, cvll_plot=True, T=10240)
+            ### 3x3 ###
+            with tabs_different_size[0]:
+                if series_3x3_show:
+                    tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
+                    for i, A_list in enumerate(All_A_list_3x3):
+                        with tabs[i]:
+                            insert_page(A_list,m_range, T=10240)
 
-        with tabs_different_size[1]:
-            if series_3x3_show:
-                tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
-                for i, A_list in enumerate(All_A_list_3x3_var_p):
-                    with tabs[i]:
-                        insert_page(A_list, T=10240)
+            with tabs_different_size[1]:
+                if series_3x3_show:
+                    tabs = st.tabs(["3x3: 2+", "3x3: 1+", "3x3: 0", "3x3: 1-", "3x3: 2+-", "3x3: 3+-"])
+                    for i, A_list in enumerate(All_A_list_3x3_var_p):
+                        with tabs[i]:
+                            insert_page(A_list,m_range, T=10240)
 
 
 if __name__ == "__main__":
