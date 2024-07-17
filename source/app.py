@@ -293,7 +293,7 @@ def do_analysis(A_list, m_range, T = 1024, series_plot=False, sdf_plot=False, cv
     alpha = 0.05
 
     # Generate time series
-    x = generate_var_process(A_list, T, 1000, seed=None)
+    x = generate_var_process(A_list, T, 1000, seed=100)
     x = x - np.mean(x, axis=1, keepdims=True)
 
     if series_plot:

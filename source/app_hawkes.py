@@ -1,8 +1,6 @@
-import numpy as np
-
-from time_series_functions import *
 from app import *
 from hawkes_processes_functions import *
+
 
 
 ### Parameters for the simulation ###
@@ -12,8 +10,8 @@ from hawkes_processes_functions import *
 lambda_ = np.array([0.2, 0.3, 0.2])  # Baseline intensities for each process
 alpha_ = np.array([
     [0.4, 0.3, 0.0],  # Process 1 excites Process 1 and 2, but not 3
-    [0.4, 0.3, 0.3],  # Process 2 excites Process 1 and 2, but not 3
-    [0.0, 0.6, 0.5]   # Process 3 excites only itself
+    [0.4, 0.3, 0.0],  # Process 2 excites Process 1 and 2, but not 3
+    [0.0, 0.0, 0.5]   # Process 3 excites only itself
 ])
 beta = np.array([1.0, 1.0, 1.0])     # Decay rates for each process
 
@@ -23,11 +21,11 @@ theta_3x3 = lambda_, alpha_, beta
 # Define the parameters for a stationary 5x5 system
 lambda_ = np.array([0.2, 0.3, 0.2, 0.4, 0.1])  # Baseline intensities for each process
 alpha_ = np.array([
-    [0.4, 0.3, 0.0, 0.2, 0.0],  # Process 1 excites multiple processes
-    [0.0, 0.4, 0.0, 0.4, 0.2],  # Process 2 excites multiple processes
-    [0.0, 0.0, 0.4, 0.3, 0.0],  # Process 3 excites multiple processes
-    [0.0, 0.0, 0.0, 0.4, 0.4],  # Process 4 excites multiple processes
-    [0.0, 0.0, 0.0, 0.0, 0.4]   # Process 5 excites multiple processes
+    [0.5, 0.3, 0.0, 0.2, 0.0],  # Process 1 excites multiple processes
+    [0.0, 0.5, 0.0, 0.4, 0.2],  # Process 2 excites multiple processes
+    [0.0, 0.0, 0.5, 0.3, 0.0],  # Process 3 excites multiple processes
+    [0.0, 0.0, 0.0, 0.5, 0.4],  # Process 4 excites multiple processes
+    [0.0, 0.0, 0.0, 0.0, 0.5]   # Process 5 excites multiple processes
 ])
 beta = np.array([1.0, 1.0, 1.0, 1.0, 1.0])  # Decay rates for each process
 
@@ -55,12 +53,24 @@ def run_hawkes_for_theta(T, seed, theta):
         _, freq_avg_periodogram_sdf, frequencies = calculate_freq_avg_periodogram(binned_counts, m)
         freq_avg_periodogram_sdf_list.append(freq_avg_periodogram_sdf)
         frequencies_list.append(frequencies)
-    st.plotly_chart(
-        figure_or_data=plot_sdf_with_theoretical(frequencies, freq_avg_periodogram_sdf_list, name_list,
-                                                 theoretical_sdf=None, log_scale=True,
-                                                 different_frequencies=frequencies_list),
-        use_container_width=True,
-    )
+
+    tabs = st.tabs(['Normal', 'Log-scale'])
+    with tabs[0]:
+        st.subheader("SDF estimates on normal scale")
+        st.plotly_chart(
+            figure_or_data=plot_sdf_with_theoretical(frequencies, freq_avg_periodogram_sdf_list, name_list,
+                                                     theoretical_sdf=None, log_scale=False,
+                                                     different_frequencies=frequencies_list),
+            use_container_width=True,
+        )
+    with tabs[1]:
+        st.subheader("SDF estimates on log scale")
+        st.plotly_chart(
+            figure_or_data=plot_sdf_with_theoretical(frequencies, freq_avg_periodogram_sdf_list, name_list,
+                                                     theoretical_sdf=None, log_scale=True,
+                                                     different_frequencies=frequencies_list),
+            use_container_width=True,
+        )
     show_plots = True
     if show_plots:
         st.subheader(body=f"Realisation of Mutually Exciting Hawkes processes ({alpha_.shape[0]})")
@@ -75,10 +85,17 @@ def run_hawkes_for_theta(T, seed, theta):
             figure_or_data=plot_binned_event_counts(bins_list[0], binned_counts_list[0], lambda_),
             use_container_width=True,
         )
-    for num_bins, binned_counts, means in zip(num_bins_list, binned_counts_list, means_list):
-        st.subheader('Number of bins: ' + str(num_bins))
-        st.write(f"Mean of each process is: {means}")
-        run_hawkes_for_num_bin(num_bins, binned_counts, theta, T)
+
+    tab_names = []
+    for num_bins in num_bins_list:
+        tab_names.append(f"Number of bins: {num_bins}")
+    tabs_bins = st.tabs(tab_names)
+
+    for i, (num_bins, binned_counts, means) in enumerate(zip(num_bins_list, binned_counts_list, means_list)):
+        with tabs_bins[i]:
+            st.subheader('Number of bins: ' + str(num_bins))
+            st.write(f"Mean of each process is: {means}")
+            run_hawkes_for_num_bin(num_bins, binned_counts, theta, T)
 
 
 def produce_binned_hawkes_list(theta, T, seed):

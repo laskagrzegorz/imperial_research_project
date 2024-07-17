@@ -365,7 +365,7 @@ def plot_sdf_with_theoretical(frequencies, empirical_sdf_list, empirical_names, 
     return fig
 
 
-def invert_spectral_matrix(spectral_matrix, noise_level=1e-10):
+def invert_spectral_matrix(spectral_matrix, noise_level=0):
     """
     Invert the spectral matrix for each frequency, adding a small noise to avoid singularity.
 
@@ -388,6 +388,36 @@ def invert_spectral_matrix(spectral_matrix, noise_level=1e-10):
         inv_spectral_matrix[:, :, k] = np.linalg.inv(spectral_matrix[:, :, k] + noise)
 
     return inv_spectral_matrix
+
+
+def calculate_partial_coherence(spectral_matrix, noise_level=0):
+    """
+    Calculate partial coherence from the spectral matrix.
+
+    Parameters:
+    spectral_matrix (numpy.ndarray): Spectral matrix for each frequency with shape (p, p, num_frequencies).
+    noise_level (float): Noise level to add to the diagonal to avoid singular matrices during inversion.
+
+    Returns:
+    partial_coherence (numpy.ndarray): Partial coherence for each frequency with shape (p, p, num_frequencies).
+    """
+    # Invert the spectral matrix
+    inv_spectral_matrix = invert_spectral_matrix(spectral_matrix, noise_level)
+
+    num_series, _, num_frequencies = spectral_matrix.shape
+    partial_coherence = np.ones((num_series, num_series, num_frequencies))
+
+    # Calculate partial coherence for each frequency
+    for freq in range(num_frequencies):
+        for j in range(num_series):
+            for k in range(num_series):
+                if j != k:
+                    S_jk_inv = inv_spectral_matrix[j, k, freq]
+                    S_jj_inv = inv_spectral_matrix[j, j, freq]
+                    S_kk_inv = inv_spectral_matrix[k, k, freq]
+                    partial_coherence[j, k, freq] = (np.abs(S_jk_inv) ** 2) / (S_jj_inv * S_kk_inv).real
+
+    return partial_coherence
 
 ## Estimates ##
 
