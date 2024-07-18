@@ -202,8 +202,6 @@ def main():
         layout="wide",
     )
 
-    st.write("ddddd111")
-
     st.header(body="Gregg's research project")
     st.markdown("---")
 
