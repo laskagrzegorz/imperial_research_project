@@ -545,6 +545,48 @@ def calculate_freq_avg_periodogram(x, m, f_minus_j_0=False):
 
     return w_k, f_hat, frequences
 
+
+def calculate_freq_avg_periodogram_mirrored(x, m, f_minus_j_0=False):
+    """
+    Calculate the smoothed spectral density estimate using log-window with sinusoidal tapers.
+
+    Parameters:
+    x (np.ndarray): time series (num_series, num_series, num_samples).
+    m (int): Number of tapers to use.
+
+    Returns:
+    w_k (np.ndarray): Sinusoidal taper weights of shape (m,).
+    f_hat (np.ndarray): Smoothed spectral density estimate of shape (num_series, num_series, num_frequencies).
+    """
+
+    frequences, I = calculate_periodogram(x)
+    _, _, num_frequencies = I.shape
+
+    f_hat = np.zeros_like(I, dtype=complex)
+    k_values = np.arange(-m // 2, m // 2 + 1)
+    w_k = np.cos(np.pi * k_values / m)
+
+    if f_minus_j_0:
+        w_k[m // 2] = 0
+
+    # Ensure weights sum to 1
+    w_k /= np.sum(w_k)
+
+    # Mirror the array
+    I_mirrored_left = np.flip(I, axis=-1)  # Mirrored version of I along the last axis
+    I_mirrored_right = np.flip(I, axis=-1)  # Mirrored version of I along the last axis
+
+    # Concatenate the original and mirrored arrays
+    I_extended = np.concatenate((I_mirrored_left, I, I_mirrored_right), axis=-1)
+
+    start = num_frequencies - m // 2
+    end = num_frequencies + m // 2 + 1
+
+    for i in range(num_frequencies):
+        f_hat[:, :, i] = np.sum(I_extended[:, :, start + i: end + i] * w_k, axis=2)
+
+    return w_k, f_hat, frequences
+
 # Sinusoidal Multi-Taper
 
 def sinusoidal_tapers(num_samples, num_tapers):
@@ -691,7 +733,7 @@ def calculate_kl_divergence(T1, T2, T):
     Returns:
     float: The estimated Kullback-Leibler divergence.
     """
-    n, _, num_freq = T1.shape
+    p, _, num_freq = T1.shape
     kl_div = 0
 
     for k in range(1, num_freq):
@@ -701,11 +743,8 @@ def calculate_kl_divergence(T1, T2, T):
         matrix_term = T1_k @ inv_T2_k
         term1 = np.trace(matrix_term)
         term2 = np.log(np.linalg.det(matrix_term))
-
-
-
         if k != 0:
-            kl_div += term1 - term2 - n
+            kl_div += term1 - term2 - p
 
     kl_div /= T
 
