@@ -212,8 +212,6 @@ def plot_time_series(x):
         template='plotly_white'
     )
 
-
-
     return fig
 
 
