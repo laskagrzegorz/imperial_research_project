@@ -23,7 +23,15 @@ def categorize_files_first_algorithm(files, n):
         # Extracting m and T values
         m_part = [part for part in parts if part.startswith('m=')][0]
         T_part = [part for part in parts if part.startswith('T=')][0]
-        type_part = 'independentcon' if 'independentcon' in file_name else 'independent'
+
+        if 'independentcon' in file_name:
+            type_part = 'independentcon'
+        elif 'independent' in file_name:
+            type_part = 'independent'
+        elif 'matsuda' in file_name:
+            type_part = 'matsuda'
+        else:
+            type_part = 'other'  # fallback for other types if necessary
 
         m_value = m_part.split('=')[1]
         T_value = T_part.split('=')[1]
@@ -282,6 +290,8 @@ def show_one_test_stat_given_m(test_stats):
         use_container_width=True,
     )
 
+    return np.sum(test_stats > percentile_95) / len(test_stats)
+
 
 
 
@@ -302,25 +312,19 @@ def simulate_for_given_path_fix_m(m, file_path):
     test_stats_mirror = df['Test_Stat_Mirror']
     test_stats_gregg = df['Test_Stat_Gregg']
 
-    with st.expander(f"M parameter = {m}", expanded=True):
+    with st.expander(f"M parameter = {m}", expanded=False):
 
         cols = st.columns(2)
 
         with cols[0]:
             st.subheader('Test_Stat_Mirror')
-            show_one_test_stat_given_m(test_stats_mirror)
+            power_mirror = show_one_test_stat_given_m(test_stats_mirror)
 
         with cols[1]:
             st.subheader('test_stats_Gregg')
-            show_one_test_stat_given_m(test_stats_gregg)
+            power_gregg = show_one_test_stat_given_m(test_stats_gregg)
 
-
-
-
-
-
-
-
+    return power_mirror, power_gregg
 
 
 def simulate_for_given_path_variable_m(file_path):
@@ -347,7 +351,7 @@ def simulate_for_given_path_variable_m(file_path):
 
         show_one_test_stat_given_m_none(T, m_values, test_stats_mirror)
 
-    with st.expander("Test Statistics of Clamped Frequency Average", expanded=True):
+    with st.expander("Test Statistics of Clamped Frequency Average", expanded=False):
         show_one_test_stat_given_m_none(T, m_values, test_stats_gregg)
 
 
@@ -370,6 +374,12 @@ def simulation_pre_T_and_m_FS_algorithm(data_dict):
         parsed_data.sort(key=lambda x: x[0])
         return parsed_data
 
+    all_data = {
+        'm_value': [],
+        'mirror': [],
+        'gregg': []
+    }
+
     # Streamlit app
     st.subheader("Simulation by m value")
 
@@ -378,17 +388,69 @@ def simulation_pre_T_and_m_FS_algorithm(data_dict):
 
     for i, T_key in enumerate(data_dict.keys()):
         with tabs[i]:
+
+            container = st.container(border=True)
+
+            all_data = {
+                'm_value': [],
+                'mirror': [],
+                'gregg': []
+            }
             sorted_paths = get_sorted_paths(data_dict[T_key])
             for m_value, path in sorted_paths:
-                simulate_for_given_path_fix_m(m_value, path)
+                power_mirror, power_gregg = simulate_for_given_path_fix_m(m_value, path)
+                all_data['m_value'].append(m_value)
+                all_data['mirror'].append(power_mirror)
+                all_data['gregg'].append(power_gregg)
+
+
+            container.plotly_chart(
+                figure_or_data=plot_all_data(all_data),
+                use_container_width=True,
+            )
+
+
+def plot_all_data(all_data):
+    # Create a scatter plot with log scale for x-axis
+    fig = go.Figure()
+
+    # Add traces for mirror and gregg
+    fig.add_trace(go.Scatter(x=all_data['m_value'], y=all_data['mirror'], mode='lines+markers', name='Mirror'))
+    fig.add_trace(go.Scatter(x=all_data['m_value'], y=all_data['gregg'], mode='lines+markers', name='Gregg'))
+
+    # Add an invisible trace for the 5% line to appear in the legend
+    fig.add_trace(go.Scatter(
+        x=[min(all_data['m_value']), max(all_data['m_value'])],
+        y=[0.05, 0.05],
+        mode='lines',
+        line=dict(color="Red", width=2, dash="dash"),
+        name='5%'
+    ))
+
+
+    # Set x-axis to log scale
+    fig.update_layout(
+        xaxis_type='log',
+        yaxis_range=[-0.1, max(max(all_data['mirror']), max(all_data['gregg'])) * 1.1],
+        title='Simulation Results',
+        xaxis_title='m value (log scale)',
+        yaxis_title='Power',
+        legend_title='Power Type'
+    )
+
+    return fig
+
+
 
 
 def analysis_by_type_FS_algorithm(organized_files_selected):
     files_m_none = filter_files_with_m_none(organized_files_selected)
-    tabs = st.tabs(list(files_m_none.keys()))
-    for i, path in enumerate(files_m_none.values()):
-        with tabs[i]:
-            simulate_for_given_path_variable_m(path)
+
+    if files_m_none.keys():
+        tabs = st.tabs(list(files_m_none.keys()))
+        for i, path in enumerate(files_m_none.values()):
+            with tabs[i]:
+                simulate_for_given_path_variable_m(path)
     st.markdown("---")
     simulation_pre_T_and_m_FS_algorithm(organized_files_selected)
 
@@ -403,7 +465,7 @@ def show_all_simulations_first_second_algorithm(directory_path='../simulations_d
     organized_files_5 = categorize_files_first_algorithm(file_list, 5)
     organized_files_7 = categorize_files_first_algorithm(file_list, 7)
 
-    tabs = st.tabs(['5x5 independent','5x5 conditional independent','7x7 conditional independent'])
+    tabs = st.tabs(['5x5 independent','5x5 conditional independent','7x7 conditional independent', '5x5 matsuda'])
 
     with tabs[0]:
         organized_files_selected = organized_files_5['independent']
@@ -413,6 +475,9 @@ def show_all_simulations_first_second_algorithm(directory_path='../simulations_d
         analysis_by_type_FS_algorithm(organized_files_selected)
     with tabs[2]:
         organized_files_selected = organized_files_7['independentcon']
+        analysis_by_type_FS_algorithm(organized_files_selected)
+    with tabs[3]:
+        organized_files_selected = organized_files_5['matsuda']
         analysis_by_type_FS_algorithm(organized_files_selected)
 
 
