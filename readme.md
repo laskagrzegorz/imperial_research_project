@@ -1,6 +1,6 @@
 # Imperial Research Project
 
-This repository contains the code and resources for an ongoing research project conducted at Imperial College London. The project focuses on developing novel machine learning models for predicting climate patterns in urban environments.
+This repository contains the code and resources for an ongoing research project conducted at Imperial College London. The project focuses on detecting edges in graph structure of stationary Mutually Exciting Hawkes Processes.
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -8,7 +8,6 @@ This repository contains the code and resources for an ongoing research project 
 3. [Getting Started](#getting-started)
 4. [Contributing](#contributing)
 5. [License](#license)
-6. [Acknowledgments](#acknowledgments)
 
 ## Project Overview
 
@@ -18,11 +17,7 @@ Our research focuses on improving the accuracy of short-term weather forecasts i
 
 ### Key Features
 
-- Real-time sensor data integration
-- Historical climate record analysis
-- Advanced neural network architectures
-- Ensemble forecasting method
-- Interactive visualization dashboard
+....
 
 ## Getting Started
 
