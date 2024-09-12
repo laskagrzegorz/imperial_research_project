@@ -11,13 +11,17 @@ This repository contains the code and resources for an ongoing research project 
 
 ## Project Overview
 
-[Imperial Research Project] is an interdisciplinary study aimed at developing cutting-edge machine learning algorithms to predict urban climate patterns. This project brings together expertise from computer science, environmental science, and mathematics to explore the complex interactions between urban infrastructure and local weather systems.
+### Non-parametric Modelling of Graph Structure for Stationary Mutually Exciting Hawkes Processes
 
-Our research focuses on improving the accuracy of short-term weather forecasts in densely populated areas using real-time sensor data and historical climate records. By leveraging advanced neural network architectures and ensemble methods, we aim to enhance the reliability and precision of urban weather predictions.
-
+This project explores non-parametric approaches to model the structure of undirected graphs using stationary time series data. The focus is on applying algorithms traditionally used for Gaussian processes to Mutually Exciting Hawkes Processes (MEHP). These processes are widely used in fields such as epidemiology, finance, and social media analysis, where events are self-exciting and mutually exciting, meaning that the occurrence of one event increases the likelihood of subsequent events.
 ### Key Features
 
-....
+Key Features:
+1. **Graphical Models for Time Series**: The project constructs graphical models to represent relationships between multiple time series. Each time series is represented as a vertex, and edges between vertices represent connections based on partial correlation.
+2. **Spectral Domain Analysis**: Algorithms are applied in the frequency domain to test for the presence of edges in an undirected graph. This approach provides a more generalized model structure that does not assume Gaussianity, allowing the inclusion of non-Gaussian processes like the Mutually Exciting Hawkes Process.
+3. **Performance Evaluation**: The project compares the performance of classical Gaussian-based methods (like Matsuda and Medkour algorithms) and extends them to handle MEHPs through simulations.
+4. **Applications**: The methods explored in this project have potential applications in finance (for modeling financial contagion), epidemiology (for modeling disease spread), and social media (for modeling information diffusion).
+5. This repository contains the code, simulation data, and algorithms used for non-parametric graph structure modeling in both Gaussian and Hawkes processes.
 
 ## Getting Started
 
