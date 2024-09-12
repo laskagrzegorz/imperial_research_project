@@ -1,4 +1,4 @@
-from time_series_functions import *
+from .time_series_functions import *
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.random as rnd
@@ -183,7 +183,6 @@ def display_hawkes_equation(theta):
     """, unsafe_allow_html=True)
 
 
-
 def compute_intensity_over_time(times, ids, theta, T, num_points=1000):
     """
     Compute the intensity functions over a range of time points.
@@ -211,11 +210,11 @@ def compute_intensity_over_time(times, ids, theta, T, num_points=1000):
 ### Bayesian Optimalization ###
 
 
-def bayesian_search_cvll(binned_counts, num_bins):
+def bayesian_search_cvll(binned_counts, num_bins, percentage_of_frequencies=1):
     # Wrapper function for optimization
     def cvll_criterion_wrapper(params):
         m = int(params[0])  # Ensure m is treated as an integer
-        return cvll_criterion(binned_counts, m)
+        return cvll_criterion(binned_counts, m, percentage_of_frequencies)
 
     # Define the search space for m (example range: 1 to 50)
     space = [
@@ -355,5 +354,183 @@ def simulate_and_bin_hawkes(theta, T, num_bins, seed=None):
     bins, binned_counts = bin_hawkes_process([e[0] for e in times], ids, T, num_bins)
 
     return event_times, bins, binned_counts
+
+
+### Simulation Functions ###
+
+def simulate_maximin_stepdown_test_one_edge_m_hawkes(theta, T, num_bins, m, edge, alpha=0.05):
+    # Generate time series
+    event_times, bins, binned_counts = simulate_and_bin_hawkes(theta, T, num_bins)
+
+    binned_counts -= np.mean(binned_counts, axis=1, keepdims=True)
+
+    frequencies, T_0 = sinusoidal_multitaper_sdf_matrix(binned_counts, m)
+
+    partial_coherence = calculate_partial_coherence(T_0)
+
+    num_series, _, num_frequencies = partial_coherence.shape
+
+    critical_values_holm = np.zeros(num_frequencies)
+    # Calculate critical values for each frequency bin
+    for l in range(1, num_frequencies + 1):
+        critical_values_holm[l - 1] = calculate_critical_region_holm(alpha, num_frequencies, l, m, num_series)
+
+    j, k = edge
+    R_l = partial_coherence[j, k, :]
+    R_ordered = np.sort(R_l)[::-1]
+    # Check where R_ordered is greater than critical_values
+    comparison = R_ordered > critical_values_holm
+    comparison = np.sum(comparison)
+    RHH = np.round(comparison / num_frequencies, 2)
+
+    return RHH
+
+
+def convert_to_serializable(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (tuple, list)):
+        return [convert_to_serializable(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    return obj
+
+
+def run_simulation_and_save_results_hawkes(config, max_value=25, num_simulations=1000, force_save=False, tag=""):
+    m_list = config['m_list']
+    T = config["T"]
+    delta = config['delta']
+    addition_term = np.array(config['addition_term'])
+    edge = config['edge']
+    initial_theta = config['theta']
+    num_bins = config['num_bins']
+
+    initial_theta_list = list(initial_theta)
+
+    print(len(initial_theta_list))
+
+    # Create a directory name excluding the timestamp
+    dir_name_without_timestamp = f'size={initial_theta_list[1].shape[0]}_T={T}_n={num_simulations}_max={max_value}'
+
+    # Set path to the neighbor directory
+    base_dir = '../../../../Library/Application Support/JetBrains/PyCharm2023.3/scratches/hawkes_simulations'
+
+    # Check if a directory with the same name (excluding timestamp) exists
+    existing_dir_path = directory_exists(base_dir, dir_name_without_timestamp)
+    if existing_dir_path and not force_save:
+        print(f"Directory with the same configuration already exists: {existing_dir_path}")
+        # Load the existing results
+        config_file_path = os.path.join(existing_dir_path, 'simulation_config.json')
+        results_file_path = os.path.join(existing_dir_path, 'results_per_m.pkl')
+
+        with open(config_file_path, 'r') as file:
+            loaded_config = json.load(file)
+
+        with open(results_file_path, 'rb') as file:
+            results_per_m = pickle.load(file)
+
+        print(f"Loaded existing results from {existing_dir_path}")
+
+        plot_simulation_results(loaded_config, results_per_m)
+
+        return loaded_config, results_per_m
+
+    # Create a new directory with timestamp
+    timestamp = datetime.now().strftime('%Y.%m.%d_%H:%M:%S')
+    dir_name = f'{dir_name_without_timestamp}_{timestamp}'
+    full_dir_path = os.path.join(base_dir, dir_name) + tag  # TODO: Chenge the name here
+    os.makedirs(full_dir_path, exist_ok=True)
+
+    results_per_m = dict()
+
+    for m in m_list:
+        print(f"Processing m = {m}")
+        results_list = []
+
+        theta_list = initial_theta_list.copy()
+
+        lambda_, alpha_, beta = theta_list[0], theta_list[1], theta_list[2]
+
+        theta = lambda_, alpha_, beta
+
+        for i in range(max_value):
+            items = range(num_simulations)  # Example list of items to process
+            try:
+                # Parallelize the for loop
+                results = Parallel(n_jobs=-1)(
+                    delayed(simulate_maximin_stepdown_test_one_edge_m_hawkes)(theta, T, num_bins, m, edge,
+                                                                              alpha=0.05)
+                    for item in tqdm(items, desc=f"Processing items for m={m}, iteration={i + 1}")
+                )
+                results_list.append(results)
+            except Exception as e:
+                print(f"An error occurred during iteration {i + 1} for m={m}: {e}")
+                results_list.append([])  # Append empty results to maintain list structure in case of error
+
+            lambda_, alpha_, beta = theta
+
+            alpha_ = alpha_ + delta * addition_term
+
+
+            theta = lambda_, alpha_, beta
+
+        results_per_m[m] = results_list
+
+    # Convert the config to a JSON-serializable format
+    serializable_config = convert_to_serializable(config)
+
+    # Save the configuration to a JSON file
+    config_file_path = os.path.join(full_dir_path, 'simulation_config.json')
+    with open(config_file_path, 'w') as file:
+        json.dump(serializable_config, file, indent=4)
+
+    # Save the results to a file
+    results_file_path = os.path.join(full_dir_path, 'results_per_m.pkl')
+    with open(results_file_path, 'wb') as file:
+        pickle.dump(results_per_m, file)
+
+    # save figure
+    plot_simulation_results(config, results_per_m, path=full_dir_path)
+
+    print(f"Results saved in directory: {full_dir_path}")
+
+    return config, results_per_m
+
+
+def run_one_hawkes_simulation_hawkes(theta, T, num_bins, best_m, edge=(1, 2), bayesian_test=False, percent=1):
+    event_times, bins, binned_counts = simulate_and_bin_hawkes(theta, T, num_bins)
+
+    binned_counts -= np.mean(binned_counts, axis=1, keepdims=True)
+    # Constants
+    C = 0.617
+    D = 0.446
+    m1 = 0
+    m2 = 1
+    num_iter = 10
+
+    if bayesian_test:
+
+        m_results = bayesian_search_cvll(binned_counts, num_bins, percentage_of_frequencies=percent)
+
+        if int(m_results.x[0]) % 2 != 0:
+            best_m = m_results.x[0] + 1
+        else:
+            best_m = m_results.x[0]
+
+        _ = plot_gaussian_process(m_results)
+        # Display the plot in Streamlit
+        plt.show()
+
+    _, T_0_mirror, frequencies = calculate_freq_avg_periodogram_mirrored(binned_counts, best_m)
+
+    all_edge_removed = set()
+
+    E = {edge} | all_edge_removed
+
+    _, _, test_stat_mirror = calculate_test_stat(T_0_mirror, all_edge_removed, E, best_m,
+                                                 num_bins, C, D, m1, m2, num_iter)
+
+    return np.real(test_stat_mirror), best_m
+
 
 

@@ -8,6 +8,16 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from plotly.subplots import make_subplots
 import scipy.signal
+import os
+import json
+import pickle
+from datetime import datetime
+from joblib import Parallel, delayed
+from tqdm import tqdm
+from skopt import gp_minimize
+from skopt.space import Real, Integer
+from skopt.plots import plot_convergence, plot_gaussian_process
+from scipy.stats import norm, probplot
 
 
 ### Functions ###
@@ -283,9 +293,9 @@ def true_sdf_var_process(A, Sigma, num_points=512):
     p = len(A)  # Order of the VAR process
     k = A[0].shape[0]  # Number of dimensions
     frequencies = np.linspace(0, 0.5, num_points)  # Normalized frequency (0 to 0.5 corresponds to Nyquist frequency)
-    sdf = np.zeros((k, k, num_points), dtype=complex)
+    sdf = np.zeros((k, k, num_points), dtype=np.complex128)
 
-    I_k = np.eye(k, dtype=np.complex_)  # Identity matrix of size k
+    I_k = np.eye(k, dtype=np.complex128)  # Identity matrix of size k
 
     for freq_idx, freq in enumerate(frequencies):
         exp_sum = I_k.copy()
@@ -300,7 +310,7 @@ def true_sdf_var_process(A, Sigma, num_points=512):
             print(f"Error computing determinant: {e}")
 
         inv_exp_sum = np.linalg.inv(exp_sum)
-        # TODO keep the T or not
+
         sdf[:, :, freq_idx] = (1 / (2 * np.pi)) * inv_exp_sum @ Sigma @ np.linalg.inv(np.conj(exp_sum.T))
 
     return frequencies, sdf
@@ -846,15 +856,6 @@ def calculate_test_stat(T_0, E_1, E_2, best_m, T, C, D, m1, m2, num_iter):
 
     T_2 = iterate_algorithm(T_0, E_2, num_iter)
 
-    # TODO: Delete those plots
-
-    # frequences = np.arange(T_0.shape[2])
-    # T_2_inv = invert_spectral_matrix(T_2, 0)
-    # T_1_inv = invert_spectral_matrix(T_1, 0)
-    # plot_sdf_with_theoretical_plt(frequences, T_2_inv, T_1_inv, title=f"{E_1} vs {E_2} inverse")
-    # plot_sdf_with_theoretical_plt(frequences, T_2, T_1, title=f"{E_1} vs {E_2} normal")
-
-
     test_stat = test_statistic(T_1, T_2, T, best_m, D, m1, m2, C)
     return T_1, T_2, test_stat
 
@@ -888,7 +889,7 @@ def C_k(alpha, L_k, type="metsuda"):
     return C_k_value
 
 
-def cvll_criterion(x, m):
+def cvll_criterion(x, m, percentage_of_frequencies=1):
     """
     Calculate the CVLL criterion for a given bandwidth m.
 
@@ -901,6 +902,8 @@ def cvll_criterion(x, m):
     float: CVLL criterion value.
     """
 
+
+
     if m % 2 != 0:
         m += 1
 
@@ -910,7 +913,7 @@ def cvll_criterion(x, m):
 
     _, f_hat_minus_j_0, _ = calculate_freq_avg_periodogram(x, m, f_minus_j_0=True)
 
-    num_freq = I.shape[2]
+    num_freq = int(I.shape[2] * percentage_of_frequencies)
 
     cvll = 0.0
     for j in range(num_freq):  # TODO: now only half frequencies //4
@@ -980,6 +983,9 @@ def plot_cvll_criterion(m_range, cvll_values, min_m):
     )
 
     return fig
+
+
+### Metsuda Algorithm ###
 
 
 def backward_stepwise_selection(x, best_m, T, C, D, m1, m2, num_iter, alpha):
@@ -1072,6 +1078,9 @@ def backward_stepwise_selection(x, best_m, T, C, D, m1, m2, num_iter, alpha):
     return df_results, edges_left
 
 
+### Efficient Metsuda Algorithm
+
+
 def walden_one_step_algorithm(x, best_m, T, C, D, m1, m2, num_iter, alpha):
     E_0 = generate_all_possible_edges(x.shape[0])
 
@@ -1111,10 +1120,419 @@ def walden_one_step_algorithm(x, best_m, T, C, D, m1, m2, num_iter, alpha):
 
     edges_left = E_0 - {key for key, values in final_table.items() if values[0] < values[1]}
 
-    # st.write(f'WALDEN EDGES LEFT: {edges_left}')
-
     return df_results, edges_left
 
+
+### Maxmin Stepdown Procedure ###
+
+def calculate_critical_region_holm(alpha, L, l, n, p):
+    """
+    Calculate Holm's critical region for multiple hypothesis testing.
+
+    Parameters:
+    alpha (float): Significance level.
+    L (int): Total number of tests (frequency bins).
+    l (int): Current test index (1-based).
+    n (int): Number of complex degrees of freedom.
+    p (int): Number of time series.
+
+    Returns:
+    float: Holm's critical value for the given test index.
+    """
+    fraction = alpha / (L - l + 1)
+    holm_critical_value = 1 - (fraction) ** (1/(n - p + 1))
+    return holm_critical_value
+
+
+def maximin_stepdown_test(x, m, alpha=0.05):
+    """
+    Perform the maximin stepdown hypothesis testing procedure.
+
+    Parameters:
+    time series matrix (numpy.ndarray): Coherence matrix with shape (p, p, N).
+    alpha (float): Significance level.
+    m (int): Number of tapers.
+
+    Returns:
+    int: Number of hypotheses under the critical value for each edge.
+    """
+
+    frequencies, T_0 = sinusoidal_multitaper_sdf_matrix(x, m)
+
+    partial_coherence = calculate_partial_coherence(T_0)
+
+    num_series, _, num_frequencies = partial_coherence.shape
+
+    critical_values_holm = np.zeros(num_frequencies)
+    # Calculate critical values for each frequency bin
+    for l in range(1, num_frequencies + 1):
+        critical_values_holm[l - 1] = calculate_critical_region_holm(alpha, num_frequencies, l, m, num_series)
+
+    all_edges = generate_all_possible_edges(num_series)
+
+    RHH_list = dict()
+
+    for edge in all_edges:
+        j, k = edge
+        R_l = partial_coherence[j, k, :]
+        R_ordered = np.sort(R_l)[::-1]
+        # Check where R_ordered is greater than critical_values
+        comparison = R_ordered > critical_values_holm
+        comparison = np.sum(comparison)
+        RRH = np.round(comparison / num_frequencies, 3)
+        RHH_list[edge] = RRH
+
+    return RHH_list
+
+
+
+### Simulations Functions Maxmin Stepdown Procedure ###
+
+
+def simulate_maximin_stepdown_test_one_edge_m(A_list, T, m, edge, alpha=0.05):
+    """
+    Perform the maximin stepdown hypothesis testing procedure.
+
+    Parameters:
+    coherence_matrix (numpy.ndarray): Coherence matrix with shape (p, p, num_freq).
+    alpha (float): Significance level.
+    n (int): Number of complex degrees of freedom (tapers)
+    p (int): Number of time series.
+    m (int): Number of tapers.
+
+    Returns:
+    int: Number of hypotheses under the critical value.
+    """
+    # Generate time series
+    x = generate_var_process(A_list, T, 1000, seed=None)
+    x = x - np.mean(x, axis=1, keepdims=True)
+
+    frequencies, T_0 = sinusoidal_multitaper_sdf_matrix(x, m)
+
+    partial_coherence = calculate_partial_coherence(T_0)
+
+    num_series, _, num_frequencies = partial_coherence.shape
+
+    critical_values_holm = np.zeros(num_frequencies)
+    # Calculate critical values for each frequency bin
+    for l in range(1, num_frequencies + 1):
+        critical_values_holm[l - 1] = calculate_critical_region_holm(alpha, num_frequencies, l, m, num_series)
+
+    j, k = edge
+    R_l = partial_coherence[j, k, :]
+    R_ordered = np.sort(R_l)[::-1]
+    # Check where R_ordered is greater than critical_values
+    comparison = R_ordered > critical_values_holm
+    comparison = np.sum(comparison)
+    RHH = np.round(comparison / num_frequencies, 3)
+
+    return RHH
+
+
+def directory_exists(base_dir, dir_name):
+    existing_dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+    for existing_dir in existing_dirs:
+        if existing_dir.startswith(dir_name):
+            return os.path.join(base_dir, existing_dir)
+    return None
+
+
+def load_simulation_results(directory_path):
+    directory_path = '../third_algorithm_simulations/' + directory_path
+
+    # Construct file paths
+    config_file_path = os.path.join(directory_path, 'simulation_config.json')
+    results_file_path = os.path.join(directory_path, 'results_per_m.pkl')
+
+    # Load configuration
+    with open(config_file_path, 'r') as file:
+        config = json.load(file)
+
+    # Load results
+    with open(results_file_path, 'rb') as file:
+        results_per_m = pickle.load(file)
+
+    return config, results_per_m
+
+
+def plot_simulation_results(config, results_per_m, path=None):
+    """
+    Plots the percentage of results not equal to zero and the average results per iteration
+    for different m values. Optionally saves the plots to the specified path.
+
+    Parameters:
+    config (dict): Configuration dictionary containing 'm_list' and 'delta'.
+    results_per_m (dict): Dictionary containing results for different m values.
+    path (str, optional): Directory path to save the plots. If None, plots are not saved.
+
+    Returns:
+    None
+    """
+
+    # Create subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
+
+    # Plot 1: Percentage of Results Not Equal to Zero
+    for m in config['m_list']:
+        percent_zero_results = [(np.array(results) != 0).mean() * 100 for results in results_per_m[m]]
+        ax1.plot(np.arange(0, len(percent_zero_results) * config['delta'], config['delta']), percent_zero_results,
+                 label=f'm={m}')
+
+    ax1.axhline(y=5, color='k', linestyle='--', label='5% threshold')
+    ax1.set_xlabel('Iteration')
+    ax1.set_ylabel('Percentage of Results Not Equal to Zero (%)')
+    ax1.set_title('Percentage of Results Not Equal to Zero per Iteration for Different m Values')
+    ax1.legend()
+    ax1.grid(True)
+
+    # Plot 2: Average Results per Iteration
+    for m in config['m_list']:
+        averaged_results = [np.mean(results) for results in results_per_m[m]]
+        ax2.plot(np.arange(0, len(averaged_results) * config['delta'], config['delta']), averaged_results,
+                 label=f'm={m}')
+
+    ax2.set_xlabel('Iteration')
+    ax2.set_ylabel('Average Result')
+    ax2.set_title('Average Results per Iteration for Different m Values')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save or show the plots
+    if path is not None:
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        plot_file_path = os.path.join(path, 'simulation_results.png')
+        plt.savefig(plot_file_path)
+        print(f"Plots saved to {plot_file_path}")
+    else:
+        plt.show()
+
+
+def run_simulation_and_save_results_maxmin_var(config, max_value=50, num_simulations=1000, force_save=False, tag=""):
+    m_list = config['m_list']
+    T = config["T"]
+    alpha = config['alpha']
+    delta = config['delta']
+    addition_term = np.array(config['addition_term'])
+    initial_A_list = [np.array(config['initial_A_list'])]
+    edge = config['edge']
+
+    # Create a directory name excluding the timestamp
+    dir_name_without_timestamp = f'size={initial_A_list[0].shape[0]}_T={T}_n={num_simulations}_max={max_value}'
+
+    # Set path to the neighbor directory
+    base_dir = '../../../../Library/Application Support/JetBrains/PyCharm2023.3/scratches/third_algorithm_simulations'
+
+    # Check if a directory with the same name (excluding timestamp) exists
+    existing_dir_path = directory_exists(base_dir, dir_name_without_timestamp)
+    if existing_dir_path and not force_save:
+        print(f"Directory with the same configuration already exists: {existing_dir_path}")
+        # Load the existing results
+        config_file_path = os.path.join(existing_dir_path, 'simulation_config.json')
+        results_file_path = os.path.join(existing_dir_path, 'results_per_m.pkl')
+
+        with open(config_file_path, 'r') as file:
+            loaded_config = json.load(file)
+
+        with open(results_file_path, 'rb') as file:
+            results_per_m = pickle.load(file)
+
+        print(f"Loaded existing results from {existing_dir_path}")
+        return loaded_config, results_per_m
+
+    # Create a new directory with timestamp
+    timestamp = datetime.now().strftime('%Y.%m.%d_%H:%M:%S')
+    dir_name = f'{dir_name_without_timestamp}_{timestamp}'
+    full_dir_path = os.path.join(base_dir, dir_name) + tag  # TODO: Chenge the name here
+    os.makedirs(full_dir_path, exist_ok=True)
+
+    results_per_m = dict()
+
+    for m in m_list:
+        print(f"Processing m = {m}")
+        results_list = []
+
+        A_list = initial_A_list.copy()
+
+        for i in range(max_value):
+            items = range(num_simulations)  # Example list of items to process
+            try:
+                # Parallelize the for loop
+                results = Parallel(n_jobs=-1)(
+                    delayed(simulate_maximin_stepdown_test_one_edge_m)(A_list, T, m, edge, alpha=alpha)
+                    for item in tqdm(items, desc=f"Processing items for m={m}, iteration={i + 1}")
+                )
+                results_list.append(results)
+            except Exception as e:
+                print(f"An error occurred during iteration {i + 1} for m={m}: {e}")
+                results_list.append([])  # Append empty results to maintain list structure in case of error
+
+            A_list[0] = A_list[0] + delta * addition_term
+
+        results_per_m[m] = results_list
+
+    # Save the configuration to a JSON file
+    config_file_path = os.path.join(full_dir_path, 'simulation_config.json')
+    with open(config_file_path, 'w') as file:
+        json.dump(config, file, indent=4)
+
+    # Save the results to a file
+    results_file_path = os.path.join(full_dir_path, 'results_per_m.pkl')
+    with open(results_file_path, 'wb') as file:
+        pickle.dump(results_per_m, file)
+
+    # save figure
+    plot_simulation_results(config, results_per_m, path=full_dir_path)
+
+    print(f"Results saved in directory: {full_dir_path}")
+
+    return config, results_per_m
+
+
+### Simulations Functions Efficient Matsuda Algorithm ###
+
+
+def simulate_matsuda_one_edge_m(brut_test=False, bayesian_test=False, m=100, A_list=None, T=1024):
+    # Constants
+    C = 0.617
+    D = 0.446
+    m1 = 0
+    m2 = 1
+    num_iter = 10
+    alpha = 0.05
+
+    # Generate time series
+    x = generate_var_process(A_list, T, 1000, seed=None)
+    x = x - np.mean(x, axis=1, keepdims=True)
+
+    if brut_test:
+        m_range = np.arange(1000, 10000, 1000)
+        cvll_values, m = find_best_m(x, m_range)
+        plot_cvll_criterion(m_range, cvll_values, m)
+
+    if bayesian_test:
+        m_results = bayesian_search_cvll(x, T)
+
+        if int(m_results.x[0]) % 2 != 0:
+            m = m_results.x[0] + 1
+        else:
+            m = m_results.x[0]
+
+        _ = plot_gaussian_process(m_results)
+        # Display the plot in Streamlit
+        plt.show()
+
+    _, T_0_mirror, frequencies = calculate_freq_avg_periodogram_mirrored(x, m)
+
+    all_edge_removed = set()
+
+    E = {(1, 2)} | all_edge_removed
+
+    _, _, test_stat_mirror = calculate_test_stat(T_0_mirror, all_edge_removed, E, m,
+                                                 T, C, D, m1, m2, num_iter)
+
+    return test_stat_mirror, m
+
+
+def plot_test_stats_simulations(test_stats, name=None, limit=None):
+    mean_result = np.mean(test_stats)
+    std_result = np.std(test_stats)
+
+    # Create a figure with two subplots side by side
+    fig, axs = plt.subplots(1, 2, figsize=(15, 6))
+
+    # Plot a histogram of the results on the first subplot
+    axs[0].hist(test_stats, bins=50, edgecolor='black', density=True, alpha=0.6, label='Empirical Test Statistics')
+
+    # Plot the Gaussian distribution using mean and std from the data
+
+    if limit is not None:
+        # Set the x-axis limit to start at -3
+        axs[0].set_xlim(left=limit)
+    xmin, xmax = axs[0].get_xlim()
+    x = np.linspace(xmin, xmax, 100)
+    p = norm.pdf(x, mean_result, std_result)
+    axs[0].plot(x, p, 'r', linewidth=2, label=f'Gaussian Fit: $\mu$={mean_result:.2f}, $\sigma$={std_result:.2f}')
+
+    # Plot the density of a standard normal distribution (mean=0, std=1)
+    x = np.linspace(xmin - 3, xmax, 100)
+    p = norm.pdf(x, 0, 1)
+    axs[0].plot(x, p, 'k', linewidth=2, label=f'Density N(0,1)')
+
+    # Add labels and legend
+    axs[0].set_xlabel('Value of Test Statistic')
+    axs[0].set_ylabel('Empirical Density')
+    axs[0].legend()
+
+    # Q-Q plot of results vs. standard normal distribution on the second subplot
+    probplot(test_stats, dist="norm", plot=axs[1], fit=False)
+
+    # Customize the Q-Q plot to use black crosses for the scatter points
+    axs[1].get_lines()[0].set_marker('+')
+    axs[1].get_lines()[0].set_markerfacecolor('black')
+    axs[1].get_lines()[0].set_markeredgecolor('black')
+
+    # Set x and y-axis labels
+    axs[1].set_xlabel('Theoretical Quantiles')
+    axs[1].set_ylabel('Sample Quantiles')
+
+    # Set x and y-axis limits
+    axs[1].set_xlim(-5, 5)
+    axs[1].set_ylim(-5, 5)
+
+    # Plot a manual red line from (-5, -5) to (5, 5)
+    axs[1].plot([-5, 5], [-5, 5], 'r--')
+
+    # Remove the titles
+    axs[0].set_title('')
+    axs[1].set_title('')
+
+    # Adjust layout to avoid overlap
+    plt.tight_layout()
+
+    if name is not None:
+
+        # Create the "final" directory if it doesn't exist
+        if not os.path.exists("../../../../Library/Application Support/JetBrains/PyCharm2023.3/scratches/final"):
+            os.makedirs("../../../../Library/Application Support/JetBrains/PyCharm2023.3/scratches/final")
+
+        # Save the figure as a PDF in the "final" folder
+        plt.savefig(f"final/{name}.pdf", format='pdf', dpi=300)
+
+    # Show the plots
+    plt.show()
+
+### Bayesian Optimalization ###
+
+
+def bayesian_search_cvll(binned_counts, num_bins, percentage_of_frequencies=1):
+    # Wrapper function for optimization
+    def cvll_criterion_wrapper(params):
+        m = int(params[0])  # Ensure m is treated as an integer
+        return cvll_criterion(binned_counts, m, percentage_of_frequencies)
+
+    # Define the search space for m (example range: 1 to 50)
+    space = [
+        Integer(20, num_bins // 2, name='m')
+    ]
+
+    # Perform Bayesian optimization
+    result = gp_minimize(
+        func=cvll_criterion_wrapper,
+        dimensions=space,
+        n_calls=30,
+        random_state=42,
+        n_initial_points=15,
+        # noise=1e-10
+    )
+
+    return result
+
+
+### Extra graph plotting ###
 
 def generate_all_possible_edges(num_nodes):
     """
@@ -1198,8 +1616,6 @@ def plot_graph(num_vertices, pred_edges, true_edges):
     plt.close()
 
 
-### Extra graph plotting ###
-
 def find_missing_edges(A_list):
     zero_entries = set()
     A_list = [A_list[-1]]
@@ -1218,6 +1634,142 @@ def true_non_missing_edges(A_list):
     missing_edges = find_missing_edges(A_list)
     non_missing_edges = all_edges - missing_edges
     return non_missing_edges
+
+
+def plot_simulation_results_final_vertical(config, results_per_m, path=None):
+    """
+    Plots the percentage of results not equal to zero and the average results per iteration
+    for different m values. Optionally saves the plots to the specified path.
+
+    Parameters:
+    config (dict): Configuration dictionary containing 'm_list' and 'delta'.
+    results_per_m (dict): Dictionary containing results for different m values.
+    path (str, optional): Directory path to save the plots. If None, plots are not saved.
+
+    Returns:
+    None
+    """
+
+    color_dict = {
+        10: "#369acc",  # Dark Olive Green
+        50: "#828a00",  # Olive Green
+        100: "#f29f05",  # Mustard Yellow
+        200: "#f25c05",  # Orange
+        300: "#d6568c",  # Dusty Pink
+        400: "#4d8584",  # Teal
+        600: "#a62f03",  # Rusty Red
+        800: "#400d01"  # Dark Brown
+    }
+
+    # Create subplots (2 rows, 1 column)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+
+    # Plot 1: Percentage of Results Not Equal to Zero
+    for m in config['m_list']:
+        percent_zero_results = [(np.array(results) != 0).mean() * 100 for results in results_per_m[m]]
+        ax1.plot(np.arange(0, len(percent_zero_results) * config['delta'], config['delta']), percent_zero_results,
+                 label=f'm={m}',
+                 color=color_dict[m])
+
+    ax1.axhline(y=5, color='k', linestyle='--', label='5% threshold')
+    ax1.set_xlabel('Value of v')
+    ax1.set_ylabel('Percentage of RRH Not Equal to Zero (%)')
+    ax1.legend(loc='upper left')
+    ax1.grid(True)
+
+    # Plot 2: Average Results per Iteration
+    for m in config['m_list']:
+        averaged_results = [np.mean(results) for results in results_per_m[m]]
+        ax2.plot(np.arange(0, len(averaged_results) * config['delta'], config['delta']), averaged_results,
+                 label=f'm={m}',
+                 color=color_dict[m])
+
+    ax2.set_xlabel('Value of v')
+    ax2.set_ylabel('Average Value of RRH')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save or show the plots
+    if path is not None:
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        plot_file_path = os.path.join(path, f"simulation_result_hawkes_complex_t={config['T']}_vertical.pdf")
+        plt.savefig(plot_file_path, format='pdf', dpi=300)
+        print(f"Plots saved to {plot_file_path}")
+    else:
+        plt.show()
+
+
+def plot_simulation_results_final(config, results_per_m, path=None):
+    """
+    Plots the percentage of results not equal to zero and the average results per iteration
+    for different m values. Optionally saves the plots to the specified path.
+
+    Parameters:
+    config (dict): Configuration dictionary containing 'm_list' and 'delta'.
+    results_per_m (dict): Dictionary containing results for different m values.
+    path (str, optional): Directory path to save the plots. If None, plots are not saved.
+
+    Returns:
+    None
+    """
+
+    color_dict = {
+        10: "#369acc",  # Dark Olive Green
+        50: "#828a00",  # Olive Green
+        100: "#f29f05",  # Mustard Yellow
+        200: "#f25c05",  # Orange
+        300: "#d6568c",  # Dusty Pink
+        400: "#4d8584",  # Teal
+        600: "#a62f03",  # Rusty Red
+        800: "#400d01"  # Dark Brown
+    }
+
+    # Create subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
+
+    # Plot 1: Percentage of Results Not Equal to Zero
+    for m in config['m_list']:
+        percent_zero_results = [(np.array(results) != 0).mean() * 100 for results in results_per_m[m]]
+        ax1.plot(np.arange(0, len(percent_zero_results) * config['delta'], config['delta']), percent_zero_results,
+                 label=f'm={m}',
+                 color=color_dict[m])
+
+    ax1.axhline(y=5, color='k', linestyle='--', label='5% threshold')
+    ax1.set_xlabel('Value of v')
+    ax1.set_ylabel('Percentage of RRH Not Equal to Zero (%)')
+    # ax1.set_title('Percentage of Results Not Equal to Zero per Iteration for Different m Values')
+    ax1.legend(loc='upper left')
+    ax1.grid(True)
+
+    # Plot 2: Average Results per Iteration
+    for m in config['m_list']:
+        averaged_results = [np.mean(results) for results in results_per_m[m]]
+        ax2.plot(np.arange(0, len(averaged_results) * config['delta'], config['delta']), averaged_results,
+                 label=f'm={m}',
+                 color=color_dict[m])
+
+    ax2.set_xlabel('Value of v')
+    ax2.set_ylabel('Average Value of RRH')
+    # ax2.set_title('Average Results per Iteration for Different m Values')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save or show the plots
+    if path is not None:
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        plot_file_path = os.path.join(path, "simulation_result_var.pdf")
+        plt.savefig(plot_file_path, format='pdf', dpi=300)
+        print(f"Plots saved to {plot_file_path}")
+    else:
+        plt.show()
 
 
 def main():
