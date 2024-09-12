@@ -21,7 +21,8 @@ Key Features:
 2. **Spectral Domain Analysis**: Algorithms are applied in the frequency domain to test for the presence of edges in an undirected graph. This approach provides a more generalized model structure that does not assume Gaussianity, allowing the inclusion of non-Gaussian processes like the Mutually Exciting Hawkes Process.
 3. **Performance Evaluation**: The project compares the performance of classical Gaussian-based methods (like Matsuda and Medkour algorithms) and extends them to handle MEHPs through simulations.
 4. **Applications**: The methods explored in this project have potential applications in finance (for modeling financial contagion), epidemiology (for modeling disease spread), and social media (for modeling information diffusion).
-5. This repository contains the code, simulation data, and algorithms used for non-parametric graph structure modeling in both Gaussian and Hawkes processes.
+
+This repository contains the code, simulation data, and algorithms used for non-parametric graph structure modeling in both Gaussian and Hawkes processes.
 
 ## Getting Started
 
