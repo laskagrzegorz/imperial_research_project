@@ -14,7 +14,7 @@ This repository contains the code and resources for an ongoing research project 
 ### Non-parametric Modelling of Graph Structure for Stationary Mutually Exciting Hawkes Processes
 
 This project explores non-parametric approaches to model the structure of undirected graphs using stationary time series data. The focus is on applying algorithms traditionally used for Gaussian processes to Mutually Exciting Hawkes Processes (MEHP). These processes are widely used in fields such as epidemiology, finance, and social media analysis, where events are self-exciting and mutually exciting, meaning that the occurrence of one event increases the likelihood of subsequent events.
-### Key Features
+## Key Features
 
 Key Features:
 1. **Graphical Models for Time Series**: The project constructs graphical models to represent relationships between multiple time series. Each time series is represented as a vertex, and edges between vertices represent connections based on partial correlation.
